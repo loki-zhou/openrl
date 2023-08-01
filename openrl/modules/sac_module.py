@@ -18,18 +18,18 @@
 
 from typing import Any, Dict, Optional, Union
 
-# import gym
-import gymnasium as gym
+import gym
 import numpy as np
 import torch
 
 from openrl.modules.model_config import ModelTrainConfig
-from openrl.modules.networks.ddpg_network import ActorNetwork, CriticNetwork
+from openrl.modules.networks.ddpg_network import CriticNetwork
+from openrl.modules.networks.sac_network import SACActorNetwork
 from openrl.modules.rl_module import RLModule
 from openrl.modules.utils.util import update_linear_schedule
 
 
-class DDPGModule(RLModule):
+class SACModule(RLModule):
     def __init__(
         self,
         cfg,
@@ -46,16 +46,7 @@ class DDPGModule(RLModule):
             model=(
                 model_dict["actor"]
                 if model_dict and "actor" in model_dict
-                else ActorNetwork
-            ),
-            input_space=input_space,
-        )
-        model_configs["actor_target"] = ModelTrainConfig(
-            lr=cfg.actor_lr,
-            model=(
-                model_dict["actor_target"]
-                if model_dict and "actor_target" in model_dict
-                else ActorNetwork
+                else SACActorNetwork
             ),
             input_space=input_space,
         )
@@ -77,6 +68,24 @@ class DDPGModule(RLModule):
             ),
             input_space=input_space,
         )
+        model_configs["critic_2"] = ModelTrainConfig(
+            lr=cfg.critic_lr,
+            model=(
+                model_dict["critic_2"]
+                if model_dict and "critic_2" in model_dict
+                else CriticNetwork
+            ),
+            input_space=input_space,
+        )
+        model_configs["critic_target_2"] = ModelTrainConfig(
+            lr=cfg.critic_lr,
+            model=(
+                model_dict["critic_target_2"]
+                if model_dict and "critic_target_2" in model_dict
+                else CriticNetwork
+            ),
+            input_space=input_space,
+        )
 
         super().__init__(
             cfg=cfg,
@@ -90,24 +99,39 @@ class DDPGModule(RLModule):
         self.act_space = act_space
         self.cfg = cfg
 
+        # alpha (can be dynamically adjusted)
+        self.auto_alph = cfg.auto_alph
+        if self.auto_alph:
+            self.log_alpha = torch.zeros(1, requires_grad=True, device=device)
+            alpha_optimizer = torch.optim.Adam(
+                [self.log_alpha],
+                lr=cfg.alpha_lr,
+                eps=cfg.opti_eps,
+                weight_decay=cfg.weight_decay,
+            )
+            self.optimizers["alpha"] = alpha_optimizer
+            self.target_entropy = -np.prod(act_space.shape).item()
+        else:
+            self.log_alpha = torch.log(torch.tensor(cfg.alpha_value))
+
     def lr_decay(self, episode, episodes):
         update_linear_schedule(
             self.optimizers["critic"], episode, episodes, self.cfg.critic_lr
         )
         update_linear_schedule(
+            self.optimizers["critic_2"], episode, episodes, self.cfg.critic_lr
+        )
+        update_linear_schedule(
             self.optimizers["actor"], episode, episodes, self.cfg.actor_lr
         )
+        update_linear_schedule(
+            self.optimizers["alpha"], episode, episodes, self.cfg.alpha_lr
+        )
 
-    def get_actions(
-        self,
-        obs,
-        # rnn_states,
-        # masks,
-        # action_masks=None,
-    ):
-        action = self.models["actor"](obs)
+    def get_actions(self, obs, deterministic=True):
+        actions, _ = self.models["actor"].evaluate(obs, deterministic=deterministic)
 
-        return action
+        return actions
 
     def get_values(self, obs, action, rnn_states_critic, masks):
         critic_values, _ = self.models["critic"](obs, action, rnn_states_critic, masks)
@@ -127,16 +151,21 @@ class DDPGModule(RLModule):
     ):
         if masks_batch is None:
             masks_batch = masks
-        actions = self.get_actions(obs_batch)
 
-        actor_loss, _ = self.models["critic"](
-            obs_batch, actions, rnn_states_batch, masks_batch
+        action, log_prob = self.models["actor"].evaluate(obs_batch, deterministic=True)
+
+        q_values = torch.min(
+            self.models["critic"](obs_batch, action, rnn_states_batch, masks_batch)[0],
+            self.models["critic_2"](obs_batch, action, rnn_states_batch, masks_batch)[
+                0
+            ],
         )
-        actor_loss = -actor_loss.mean()
 
-        return actor_loss
+        actor_loss = (torch.exp(self.log_alpha) * log_prob - q_values).mean()
 
-    def evaluate_critic_loss(
+        return actor_loss, log_prob
+
+    def get_q_values(
         self,
         obs_batch,
         next_obs_batch,
@@ -144,49 +173,50 @@ class DDPGModule(RLModule):
         rewards_batch,
         actions_batch,
         masks,
-        next_masks_batch,
         action_masks=None,
         masks_batch=None,
     ):
         if masks_batch is None:
             masks_batch = masks
+
         with torch.no_grad():
-            next_q_values, _ = self.models["critic_target"](
-                next_obs_batch,
-                self.models["actor_target"](next_obs_batch),
-                rnn_states_batch,
-                masks_batch,
+            next_action, next_log_prob = self.models["actor"].evaluate(
+                next_obs_batch, deterministic=True
             )
+
+            target_q_values, _ = self.models["critic"](
+                next_obs_batch, next_action, rnn_states_batch, masks_batch
+            )
+            target_q_values = target_q_values.detach()
+            target_q_values_2, _ = self.models["critic_2"](
+                next_obs_batch, next_action, rnn_states_batch, masks_batch
+            )
+            target_q_values_2 = target_q_values_2.detach()
+
         current_q_values, _ = self.models["critic"](
             obs_batch, actions_batch, rnn_states_batch, masks_batch
         )
 
-        return next_q_values, current_q_values
+        current_q_values_2, _ = self.models["critic_2"](
+            obs_batch, actions_batch, rnn_states_batch, masks_batch
+        )
 
-    def evaluate_actions(
-        self,
-        obs_batch,
-        next_obs_batch,
-        rnn_states_batch,
-        rewards_batch,
-        actions_batch,
-        masks,
-        action_masks=None,
-        masks_batch=None,
-    ):
-        print("在ddpg_module中调用了evaluate_actions函数，该函数未实现")
+        return (
+            target_q_values,
+            target_q_values_2,
+            current_q_values,
+            current_q_values_2,
+            next_log_prob,
+        )
 
-    def act(
-        self,
-        obs,
-        # rnn_states_actor,
-        # masks,
-        # action_masks=None
-        deterministic: bool,
-    ):
-        action = self.models["actor"](obs)
+    def evaluate_actions(self):
+        # This function is not required in SAC
+        pass
 
-        return action
+    def act(self, obs, deterministic=True):
+        actions, _ = self.models["actor"].evaluate(obs, deterministic=deterministic)
+
+        return actions
 
     def get_critic_value_normalizer(self):
         return self.models["critic"].value_normalizer

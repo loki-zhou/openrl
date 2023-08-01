@@ -23,12 +23,13 @@ import numpy as np
 import torch
 
 from openrl.configs.config import create_config_parser
+from openrl.modules.base_module import BaseModule
 from openrl.modules.common.base_net import BaseNet
-from openrl.modules.dqn_module import DQNModule
-from openrl.utils.util import _t2n, set_seed
+from openrl.modules.sac_module import SACModule
+from openrl.utils.util import set_seed
 
 
-class DQNNet(BaseNet):
+class SACNet(BaseNet):
     def __init__(
         self,
         env: Union[gym.Env, str],
@@ -36,6 +37,7 @@ class DQNNet(BaseNet):
         device: Union[torch.device, str] = "cpu",
         n_rollout_threads: int = 1,
         model_dict: Optional[Dict[str, Any]] = None,
+        module_class: BaseModule = SACModule,
     ) -> None:
         super().__init__()
 
@@ -46,11 +48,10 @@ class DQNNet(BaseNet):
         set_seed(cfg.seed)
         env.reset(seed=cfg.seed)
 
+        cfg.num_agents = env.agent_num
         cfg.n_rollout_threads = n_rollout_threads
-        self.n_rollout_threads = n_rollout_threads
         cfg.learner_n_rollout_threads = cfg.n_rollout_threads
-
-        cfg.algorithm_name = "DQN"
+        cfg.algorithm_name = "SAC"
 
         if cfg.rnn_type == "gru":
             rnn_hidden_size = cfg.hidden_size
@@ -65,7 +66,7 @@ class DQNNet(BaseNet):
         if isinstance(device, str):
             device = torch.device(device)
 
-        self.module = DQNModule(
+        self.module = module_class(
             cfg=cfg,
             input_space=env.observation_space,
             act_space=env.action_space,
@@ -82,19 +83,14 @@ class DQNNet(BaseNet):
         self.masks = None
 
     def act(
-        self, observation: Union[np.ndarray, Dict[str, np.ndarray]]
+        self,
+        observation: Union[np.ndarray, Dict[str, np.ndarray]],
+        deterministic=True,
     ) -> Tuple[np.ndarray, Optional[Tuple[np.ndarray, ...]]]:
-        with torch.no_grad():
-            q_values, self.rnn_states_actor = self.module.act(
-                obs=observation,
-                rnn_states_actor=self.rnn_states_actor,
-                masks=self.masks,
-                action_masks=None,
-            )
-
-        actions = q_values.argmax(axis=-1).unsqueeze(-1)
-
-        return actions, self.rnn_states_actor
+        actions = (
+            self.module.act(observation, deterministic=deterministic).detach().numpy()
+        )
+        return actions
 
     def reset(self, env: Optional[gym.Env] = None) -> None:
         if env is not None:

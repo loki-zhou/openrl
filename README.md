@@ -29,7 +29,7 @@
 [![Embark](https://img.shields.io/badge/discord-OpenRL-%237289da.svg?logo=discord)](https://discord.gg/qfPBcVvT)
 [![slack badge](https://img.shields.io/badge/Slack-join-blueviolet?logo=slack&amp)](https://join.slack.com/t/openrlhq/shared_invite/zt-1tqwpvthd-Eeh0IxQ~DIaGqYXoW2IUQg)
 
-OpenRL-v0.0.15 is updated on July 21, 2023
+OpenRL-v0.0.16 is updated on July 30, 2023
 
 The main branch is the latest version of OpenRL, which is under active development. If you just want to have a try with OpenRL, you can switch to the stable branch.
 
@@ -63,6 +63,8 @@ Currently, the features supported by OpenRL include:
 
 - Support for [gymnasium](https://gymnasium.farama.org/) environments
 
+- Support for [Callbacks](https://openrl-docs.readthedocs.io/en/latest/callbacks/index.html), which can be used to implement various functions such as logging, saving, and early stopping
+
 - Dictionary observation space support
 
 - Popular visualization tools such as [wandb](https://wandb.ai/),  [tensorboardX](https://tensorboardx.readthedocs.io/en/latest/index.html) are supported
@@ -85,6 +87,7 @@ Algorithms currently supported by OpenRL (for more details, please refer to [Gal
 - [Deep Q-Network (DQN)](https://arxiv.org/abs/1312.5602)
 - [Multi-Agent Transformer (MAT)](https://arxiv.org/abs/2205.14953)
 - [Value-Decomposition Network (VDN)](https://arxiv.org/abs/1706.05296)
+- [Soft Actor Critic (SAC)](https://arxiv.org/abs/1812.05905)
 - [Deep Deterministic Policy Gradient (DDPG)](https://arxiv.org/abs/1509.02971)
 
 Environments currently supported by OpenRL (for more details, please refer to [Gallery](./Gallery.md)):

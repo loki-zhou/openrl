@@ -30,7 +30,7 @@
 [![Embark](https://img.shields.io/badge/discord-OpenRL-%237289da.svg?logo=discord)](https://discord.gg/qfPBcVvT)
 [![slack badge](https://img.shields.io/badge/Slack-join-blueviolet?logo=slack&amp)](https://join.slack.com/t/openrlhq/shared_invite/zt-1tqwpvthd-Eeh0IxQ~DIaGqYXoW2IUQg)
 
-OpenRL-v0.0.15 is updated on July 21, 2023
+OpenRL-v0.0.16 is updated on July 30, 2023
 
 The main branch is the latest version of OpenRL, which is under active development. If you just want to have a try with OpenRL, you can switch to the stable branch.
 
@@ -53,6 +53,7 @@ OpenRL是一个开源的通用强化学习研究框架，支持单智能体、�
 - 支持多种训练加速，例如：自动混合精度训练，半精度策略网络收集数据等
 - 支持用户自定义训练模型、奖励模型、训练数据以及环境
 - 支持[gymnasium](https://gymnasium.farama.org/)环境
+- 支持[Callbacks](https://openrl-docs.readthedocs.io/zh/latest/callbacks/index.html)，可以用于实现日志记录、保存、提前停止等各种功能
 - 支持字典观测空间
 - 支持[wandb](https://wandb.ai/)，[tensorboardX](https://tensorboardx.readthedocs.io/en/latest/index.html)等主流训练可视化工具
 - 支持环境的串行和并行训练，同时保证两种模式下的训练效果一致
@@ -70,6 +71,7 @@ OpenRL目前支持的算法（更多详情请参考 [Gallery](Gallery.md)）：
 - [Deep Q-Network (DQN)](https://arxiv.org/abs/1312.5602)
 - [Multi-Agent Transformer (MAT)](https://arxiv.org/abs/2205.14953)
 - [Value-Decomposition Network (VDN)](https://arxiv.org/abs/1706.05296)
+- [Soft Actor Critic (SAC)](https://arxiv.org/abs/1812.05905)
 - [Deep Deterministic Policy Gradient (DDPG)](https://arxiv.org/abs/1509.02971)
 
 OpenRL目前支持的环境（更多详情请参考 [Gallery](Gallery.md)）：

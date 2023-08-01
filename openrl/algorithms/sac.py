@@ -27,7 +27,7 @@ from openrl.modules.utils.util import get_grad_norm
 from openrl.utils.util import check
 
 
-class DDPGAlgorithm(BaseAlgorithm):
+class SACAlgorithm(BaseAlgorithm):
     def __init__(
         self,
         cfg,
@@ -36,9 +36,11 @@ class DDPGAlgorithm(BaseAlgorithm):
         device: Union[str, torch.device] = "cpu",
     ) -> None:
         super().__init__(cfg, init_module, agent_num, device)
-
+        self.auto_alph = self.algo_module.auto_alph
         self.gamma = cfg.gamma
         self.tau = cfg.tau
+        if self.auto_alph:
+            self.target_entropy = self.algo_module.target_entropy
 
     def prepare_critic_loss(
         self,
@@ -54,28 +56,38 @@ class DDPGAlgorithm(BaseAlgorithm):
         active_masks_batch,
         turn_on,
     ):
-        import copy
-
-        next_q_values, current_q_values = self.algo_module.evaluate_critic_loss(
+        (
+            target_q_values,
+            target_q_values_2,
+            current_q_values,
+            current_q_values_2,
+            next_log_prob,
+        ) = self.algo_module.get_q_values(
             obs_batch,
             next_obs_batch,
             rnn_states_batch,
             rewards_batch,
             actions_batch,
             masks_batch,
-            next_masks_batch,
             action_masks_batch,
             active_masks_batch,
         )
+
         with torch.no_grad():
-            target_q_values = (
+            next_q_values = (
+                torch.min(target_q_values, target_q_values_2)
+                # - torch.exp(self.algo_module.log_alpha) * next_log_prob
+            )
+            self.gamma = 1
+            q_target = (
                 rewards_batch
-                + self.gamma * next_q_values * torch.tensor(next_masks_batch)
-            ).detach()
+                + self.gamma * torch.tensor(next_masks_batch) * next_q_values
+            )
 
-        critic_loss = F.mse_loss(current_q_values, target_q_values)
+        critic_loss = F.mse_loss(current_q_values, q_target)
+        critic_loss_2 = F.mse_loss(current_q_values_2, q_target)
 
-        return critic_loss
+        return critic_loss, critic_loss_2
 
     def prepare_actor_loss(
         self,
@@ -90,7 +102,7 @@ class DDPGAlgorithm(BaseAlgorithm):
         active_masks_batch,
         turn_on,
     ):
-        actor_loss = self.algo_module.evaluate_actor_loss(
+        actor_loss, log_prob = self.algo_module.evaluate_actor_loss(
             obs_batch,
             next_obs_batch,
             rnn_states_batch,
@@ -101,9 +113,17 @@ class DDPGAlgorithm(BaseAlgorithm):
             active_masks_batch,
         )
 
-        return actor_loss
+        return actor_loss, log_prob
 
-    def ddpg_update(self, sample, turn_on=True):
+    def prepare_alpha_loss(self, log_prob):
+        alpha_loss = -(
+            torch.exp(self.algo_module.log_alpha)
+            * (log_prob + self.target_entropy).detach()
+        ).mean()
+
+        return alpha_loss
+
+    def sac_update(self, sample, turn_on=True):
         (
             obs_batch,
             _,
@@ -128,10 +148,11 @@ class DDPGAlgorithm(BaseAlgorithm):
 
         # update critic network
         self.algo_module.optimizers["critic"].zero_grad()
+        self.algo_module.optimizers["critic_2"].zero_grad()
 
         if self.use_amp:
             with torch.cuda.amp.autocast():
-                critic_loss = self.prepare_critic_loss(
+                critic_loss, critic_loss_2 = self.prepare_critic_loss(
                     obs_batch,
                     next_obs_batch,
                     rnn_states_batch,
@@ -145,8 +166,9 @@ class DDPGAlgorithm(BaseAlgorithm):
                     turn_on,
                 )
                 critic_loss.backward()
+                critic_loss_2.backward()
         else:
-            critic_loss = self.prepare_critic_loss(
+            critic_loss, critic_loss_2 = self.prepare_critic_loss(
                 obs_batch,
                 next_obs_batch,
                 rnn_states_batch,
@@ -160,26 +182,31 @@ class DDPGAlgorithm(BaseAlgorithm):
                 turn_on,
             )
             critic_loss.backward()
+            critic_loss_2.backward()
 
         if "transformer" in self.algo_module.models:
             raise NotImplementedError
         else:
             critic_para = self.algo_module.models["critic"].parameters()
+            critic_para_2 = self.algo_module.models["critic_2"].parameters()
             critic_grad_norm = get_grad_norm(critic_para)
+            critic_grad_norm_2 = get_grad_norm(critic_para_2)
 
         if self.use_amp:
-            self.algo_module.scaler.unscale_(self.algo_module.optimizers["critic"])
-            self.algo_module.scaler.step(self.algo_module.optimizers["critic"])
-            self.algo_module.scaler.update()
+            raise NotImplementedError
+            # self.algo_module.scaler.unscale_(self.algo_module.optimizers["critic"])
+            # self.algo_module.scaler.step(self.algo_module.optimizers["critic"])
+            # self.algo_module.scaler.update()
         else:
             self.algo_module.optimizers["critic"].step()
+            self.algo_module.optimizers["critic_2"].step()
 
         # update actor network
         self.algo_module.optimizers["actor"].zero_grad()
 
         if self.use_amp:
             with torch.cuda.amp.autocast():
-                actor_loss = self.prepare_actor_loss(
+                actor_loss, log_prob = self.prepare_actor_loss(
                     obs_batch,
                     next_obs_batch,
                     rnn_states_batch,
@@ -193,7 +220,7 @@ class DDPGAlgorithm(BaseAlgorithm):
                 )
                 actor_loss.backward()
         else:
-            actor_loss = self.prepare_actor_loss(
+            actor_loss, log_prob = self.prepare_actor_loss(
                 obs_batch,
                 next_obs_batch,
                 rnn_states_batch,
@@ -226,16 +253,27 @@ class DDPGAlgorithm(BaseAlgorithm):
             self.algo_module.models["critic_target"].parameters(),
         ):
             target_param.data.copy_(
-                (1 - self.tau) * param.data + self.tau * target_param.data
+                self.tau * param.data + (1 - self.tau) * target_param.data
             )
 
         for param, target_param in zip(
-            self.algo_module.models["actor"].parameters(),
-            self.algo_module.models["actor_target"].parameters(),
+            self.algo_module.models["critic_2"].parameters(),
+            self.algo_module.models["critic_target_2"].parameters(),
         ):
             target_param.data.copy_(
-                (1 - self.tau) * param.data + self.tau * target_param.data
+                self.tau * param.data + (1 - self.tau) * target_param.data
             )
+
+        if self.auto_alph:
+            # update alpha
+            self.algo_module.optimizers["alpha"].zero_grad()
+
+            if self.use_amp:
+                raise NotImplementedError
+            else:
+                alpha_loss = self.prepare_alpha_loss(log_prob)
+                alpha_loss.backward()
+                self.algo_module.optimizers["alpha"].step()
 
         # for others
         if self.world_size > 1:
@@ -244,6 +282,8 @@ class DDPGAlgorithm(BaseAlgorithm):
         loss_list = []
         loss_list.append(critic_loss)
         loss_list.append(actor_loss)
+        if self.auto_alph:
+            loss_list.append(alpha_loss)
 
         return loss_list
 
@@ -257,7 +297,7 @@ class DDPGAlgorithm(BaseAlgorithm):
     ):
         # TODO：to be finished
         raise NotImplementedError(
-            "The calc_value_loss function in ddpg.py has not implemented yet"
+            "The calc_value_loss function in sac.py has not implemented yet"
         )
 
     def to_single_np(self, input):
@@ -269,9 +309,13 @@ class DDPGAlgorithm(BaseAlgorithm):
 
         train_info["critic_loss"] = 0
         train_info["actor_loss"] = 0
+        if self.auto_alph:
+            train_info["alpha_loss"] = 0
         if self.world_size > 1:
             train_info["reduced_critic_loss"] = 0
             train_info["reduced_actor_loss"] = 0
+            if self.auto_alph:
+                train_info["reduced_alpha_loss"] = 0
 
         # todo add rnn and transformer
 
@@ -290,7 +334,7 @@ class DDPGAlgorithm(BaseAlgorithm):
                 )
 
             for sample in data_generator:
-                loss_list = self.ddpg_update(sample, turn_on)
+                loss_list = self.sac_update(sample, turn_on)
                 if self.world_size > 1:
                     train_info["reduced_critic_loss"] += reduce_tensor(
                         loss_list[0].data, self.world_size
@@ -298,9 +342,15 @@ class DDPGAlgorithm(BaseAlgorithm):
                     train_info["reduced_actor_loss"] += reduce_tensor(
                         loss_list[1].data, self.world_size
                     )
+                    train_info["reduced_alpha_loss"] += reduce_tensor(
+                        loss_list[2].data, self.world_size
+                    )
 
                 train_info["critic_loss"] += loss_list[0].item()
                 train_info["actor_loss"] += loss_list[1].item()
+                if self.auto_alph:
+                    train_info["alpha_loss"] += loss_list[2].item()
+                train_info["alpha"] = self.algo_module.log_alpha.exp().item()
 
         num_updates = 1 * self.num_mini_batch
 
