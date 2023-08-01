@@ -21,7 +21,8 @@ import time
 from abc import abstractmethod
 from typing import Optional, Tuple, Union
 
-import gym
+# import gym
+import gymnasium as gym
 import torch
 
 from openrl.modules.common import BaseNet

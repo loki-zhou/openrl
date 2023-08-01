@@ -52,9 +52,13 @@ def train():
 
     # create the neural network
 
+    # net = Net(
+    #     env, cfg=cfg, device="cuda" if "macOS" not in get_system_info()["OS"] else "cpu"
+    # )
     net = Net(
-        env, cfg=cfg, device="cuda" if "macOS" not in get_system_info()["OS"] else "cpu"
+        env, cfg=cfg, device="cpu"
     )
+
     # initialize the trainer
     agent = Agent(net, use_wandb=True)
     # start training, set total number of training steps to 20000

@@ -3,7 +3,8 @@ import copy
 import warnings
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
-import gym
+# import gym
+import gymnasium as gym
 import numpy as np
 
 from openrl.envs.vec_env import BaseVecEnv, SyncVectorEnv

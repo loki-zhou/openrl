@@ -17,7 +17,7 @@
 """"""
 from typing import Dict, Optional, Tuple, Type, Union
 
-import gym
+import gymnasium as gym
 import numpy as np
 import torch
 

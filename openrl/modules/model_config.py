@@ -18,7 +18,8 @@
 
 from typing import Optional
 
-import gym
+# import gym
+import gymnasium as gym
 import torch
 
 

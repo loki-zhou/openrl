@@ -4,7 +4,8 @@
 
 from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple, Union
 
-import gym
+# import gym
+import gymnasium as gym
 import numpy as np
 import torch as th
 

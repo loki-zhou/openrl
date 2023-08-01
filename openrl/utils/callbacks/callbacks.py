@@ -3,7 +3,8 @@
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, List, Optional, Union
 
-import gym
+# import gym
+import gymnasium as gym
 
 import openrl.utils.callbacks.callbacks_factory as callbacks_factory
 from openrl.envs.vec_env import BaseVecEnv

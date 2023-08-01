@@ -17,7 +17,7 @@
 """"""
 from typing import Optional, Type, Union
 
-import gym
+import gymnasium as gym
 import torch
 
 from openrl.algorithms.base_algorithm import BaseAlgorithm

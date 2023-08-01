@@ -20,7 +20,9 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
 import torch
-from gym import spaces
+# from gym import spaces
+from gymnasium import spaces
+
 
 from openrl.modules.base_module import BaseModule
 from openrl.modules.model_config import ModelTrainConfig
